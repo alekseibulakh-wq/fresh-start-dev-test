@@ -1,0 +1,80 @@
+name: Stage 12 staging deploy
+on:
+  push:
+    branches: [dev/stage12-deploy-20260906]
+permissions:
+  contents: read
+concurrency:
+  group: fresh-start-staging-deploy
+  cancel-in-progress: false
+jobs:
+  release-ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 4060ab70d1c0717e66c2f8a4cb4b195bd74ca688
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install CI dependencies
+        run: python -m pip install -r requirements-ci.txt
+      - name: Lint
+        run: ruff check .
+      - name: Typecheck application
+        run: mypy
+      - name: Unit tests
+        run: python -B -m unittest -v test_greeting test_health
+      - name: HTTP integration tests
+        run: python -B -m unittest discover -s tests/integration -v
+      - name: Build wheel and source distribution
+        run: python -m build --no-isolation
+      - name: Verify installed wheel outside source tree
+        run: |
+          python -m venv /tmp/health-wheel
+          /tmp/health-wheel/bin/python -m pip install --no-deps dist/*.whl
+          cd /tmp
+          /tmp/health-wheel/bin/python -c 'from health import application; assert b"".join(application({"PATH_INFO": "/health", "REQUEST_METHOD": "GET"}, lambda status, headers: None)) == b"{\"status\":\"ok\"}"'
+      - name: Dependency audit including CI environment
+        run: pip-audit --strict
+      - name: SAST application
+        run: bandit -r health.py -ll
+      - name: Scan checkout for secrets
+        run: python ci/check_secrets.py
+
+  deploy-staging:
+    needs: release-ci
+    if: github.repository == 'alekseibulakh-wq/fresh-start-dev-test' && github.ref == 'refs/heads/dev/stage12-deploy-20260906'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Deploy the approved immutable pilot release
+        env:
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_SSH_KEY"
+          umask 077
+          workdir=$(mktemp -d)
+          trap 'rm -rf "$workdir"' EXIT
+          printf '%s\n' "$STAGING_SSH_KEY" > "$workdir/key"
+          cat > "$workdir/known_hosts" <<'KNOWN_HOSTS'
+          # 72.60.91.48:22 SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.18
+          72.60.91.48 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEbhfNSMYR87jMSfqw4yYFNGIjGneIlkQ7wsuHekhO+r
+          KNOWN_HOSTS
+          ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$workdir/known_hosts" -o ConnectTimeout=15 \
+            -i "$workdir/key" deploy-staging@72.60.91.48 \
+            'deploy 4060ab70d1c0717e66c2f8a4cb4b195bd74ca688'
+      - name: Verify public HTTPS after deploy
+        run: |
+          python - <<'PYVERIFY'
+          import urllib.request
+          with urllib.request.urlopen("https://prepilot.aladdin-kids.uz/health", timeout=15) as response:
+              assert response.status == 200
+              assert response.read() == b'{"status":"ok"}'
+          PYVERIFY
