@@ -1,0 +1,16 @@
+name: Fresh Start tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  unit-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run synthetic tests
+        run: python3 -m unittest -v
