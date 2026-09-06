@@ -45,3 +45,8 @@ git diff --check
 
 The lint command uses the supplied QA tool; the application itself needs only
 Python's standard library.
+
+## Expanded CI
+The existing required `unit-tests` check now runs lint, strict application type checking, all unit tests, real loopback HTTP integration tests, wheel/sdist build, installed-wheel smoke test, dependency audit (including CI tools), Bandit SAST and detect-secrets scanning of the checkout. Any failure fails the required job. CI uses hosted Ubuntu and read-only repository permission, with actions pinned to commits. No credentials or paid services are required.
+
+Use Python 3.12 and install `requirements-ci.txt`, then run the commands in `.github/workflows/test.yml`. `mypy` and Bandit cover application code; tests are covered by lint and execution. Secret scanning covers current files, not Git history, and never prints matched values. There are no runtime dependencies or container images; container scanning is deferred until an image exists. Dependency versions need periodic maintenance; audit failure must be investigated rather than ignored.

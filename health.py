@@ -1,9 +1,13 @@
 """Dependency-free WSGI application for a synthetic health endpoint."""
 
 import json
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from _typeshed.wsgi import StartResponse
 
 
-def application(environ, start_response):
+def application(environ: dict[str, Any], start_response: "StartResponse") -> list[bytes]:
     """Return a JSON response without opening a network connection."""
     extra_headers = []
     if environ.get("PATH_INFO") != "/health":

@@ -20,3 +20,6 @@ No deployment or production configuration changes. A PR is not production approv
 Required behavior, meaningful tests, lint, diff review and PR. Report CI and human review separately; never claim merge or deployment.
 # UI / Design Rules
 No UI in this project. Future UI must use approved canon, tokens and components and receive independent Design Review.
+
+# Authorized stage 11 CI maintenance
+The stage 11 infrastructure task may edit .github/workflows/test.yml and supporting CI files on its own dev/ branch and publish a reviewable PR. This explicit exception applies only to CI maintenance; the health-endpoint orchestrator profile remains unchanged. The integration suite may open an ephemeral loopback-only test server. No merge or security-permission changes. Run the complete workflow checks before reporting success.
