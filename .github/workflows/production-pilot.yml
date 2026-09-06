@@ -1,0 +1,59 @@
+name: Stage 13 production pilot lifecycle
+on:
+  push:
+    branches: [dev/stage13-production-20260906]
+permissions:
+  contents: read
+concurrency:
+  group: fresh-start-production-pilot
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Check baseline staging HTTPS
+        run: |
+          python - <<'PY'
+          import urllib.request
+          with urllib.request.urlopen("https://prepilot.aladdin-kids.uz/health",timeout=15) as r:
+              assert r.status==200 and r.read()==b'{"status":"ok"}'
+              assert r.headers.get("X-Fresh-Start-Environment")!="production-pilot"
+          print("Baseline staging is available. The production job requires human review.")
+          PY
+  production-pilot:
+    needs: preflight
+    if: github.repository == 'alekseibulakh-wq/fresh-start-dev-test' && github.ref == 'refs/heads/dev/stage13-production-20260906'
+    environment: stage13-production-pilot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Run approved one-use deploy, recovery, HTTPS and cleanup lifecycle
+        env:
+          PRODUCTION_TRIAL_SSH_KEY: ${{ secrets.PRODUCTION_TRIAL_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCTION_TRIAL_SSH_KEY"
+          umask 077
+          trial_dir=$(mktemp -d)
+          trap 'rm -rf "$trial_dir"' EXIT
+          printf '%s\n' "$PRODUCTION_TRIAL_SSH_KEY" > "$trial_dir/key"
+          cat > "$trial_dir/known_hosts" <<'KNOWN_HOSTS'
+          72.60.91.48 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEbhfNSMYR87jMSfqw4yYFNGIjGneIlkQ7wsuHekhO+r
+          KNOWN_HOSTS
+          ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$trial_dir/known_hosts" -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=60 \
+            -i "$trial_dir/key" deploy-production@72.60.91.48 'trial stage13-pilot-v1'
+      - name: Confirm staging HTTPS after cleanup
+        run: |
+          python - <<'PY'
+          import urllib.request
+          for path in ["/health","/login/"]:
+              with urllib.request.urlopen("https://prepilot.aladdin-kids.uz"+path,timeout=15) as r:
+                  assert r.status==200
+                  assert r.headers.get("X-Fresh-Start-Environment")!="production-pilot"
+                  if path=="/health": assert r.read()==b'{"status":"ok"}'
+          print("Staging restored; production pilot lifecycle completed.")
+          PY
